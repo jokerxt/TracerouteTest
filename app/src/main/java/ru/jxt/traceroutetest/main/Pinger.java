@@ -10,13 +10,11 @@ import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 
 import ru.jxt.traceroutetest.MainActivity;
+import ru.jxt.traceroutetest.main.tasks.GetTimePingTask;
 
-public class Pinger {
+public class Pinger extends PingerRoot {
 
-    public static final int MAX_HOP = 255;
-    public static final int DEFAULT_PACKET_SIZE = 56;
-
-    private SortedMap<Hop, Future<UpdatePingTask>> futures;
+    private SortedMap<NetworkNode, Future<GetTimePingTask>> futures;
     private Storage mStorage;
 
     public Pinger(Storage storage) {
@@ -25,14 +23,24 @@ public class Pinger {
     }
 
     public void pingAllNodes(int count, int interval, int timeout) {
-        SortedSet<Hop> hops = mStorage.getHops();
+        SortedSet<NetworkNode> networkNodes = mStorage.getNetworkNodes();
+        if (!networkNodes.isEmpty()) {
+            for (NetworkNode networkNode : networkNodes) {
+                //проходимся по всем узлам и пингуем их
+                GetTimePingTask task = new GetTimePingTask(networkNode, count, timeout) {
+                    @Override
+                    protected void postRun(NetworkNode networkNode) {
+                        super.postRun(networkNode);
+                        //после пинга удаляем Future из мап (за мапом следим в isFinished)
+                        if(futures.get(networkNode) != null)
+                            futures.remove(networkNode);
+                    }
+                };
 
-        if (!hops.isEmpty()) {
-            for (Hop hop : hops) {
-                UpdatePingTask task = new UpdatePingTask(hop, count, timeout);
                 try {
-                    if (futures.put(hop, mStorage.getExecutor().submit(task, task)) != null)
-                        log("Failed to insert future for hop " + hop);
+                    //выполняем и складываем Future в мап
+                    if (futures.put(networkNode, mStorage.getExecutor().submit(task, task)) != null)
+                        Log.w(MainActivity.TAG, "Failed to insert future for networkNode " + networkNode);
                     else
                         TimeUnit.SECONDS.sleep(interval);
                 } catch (InterruptedException ignored) {}
@@ -44,26 +52,4 @@ public class Pinger {
         return futures.isEmpty();
     }
 
-    public class UpdatePingTask extends PingTask {
-
-        public void run() {
-            super.run();
-        }
-
-        public UpdatePingTask(Hop hop, int count, int timeout) {
-            super(hop, hop.getInetAddress(), count, MAX_HOP, timeout, DEFAULT_PACKET_SIZE);
-        }
-
-        protected void postRun(Hop hop) {
-            if(futures.get(hop) != null)
-                futures.remove(hop);
-
-            if (this.responseIp == null)
-                hop.setIcmpResponse(Hop.ICMP_RESPONSE.NO_ANSWER);
-        }
-    }
-
-    private void log(String msg) {
-        Log.w(MainActivity.TAG, msg);
-    }
 }

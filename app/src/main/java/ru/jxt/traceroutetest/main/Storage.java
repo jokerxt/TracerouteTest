@@ -8,17 +8,18 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class Storage {
-    private ExecutorService executor;
-    private SortedSet<Hop> hops;
+    private ExecutorService executor;               //храним исполнитель
+    private SortedSet<NetworkNode> networkNodes;    //и список всех узлов
 
     public Storage() {
-        hops = Collections.synchronizedSortedSet(new TreeSet<>(getHopComparator()));
+        //получаем синхронизированную потокобезопасную коллекцию TreeSet
+        networkNodes = Collections.synchronizedSortedSet(new TreeSet<>(getHopComparator()));
         executor = Executors.newCachedThreadPool();
     }
 
-    class HopComparator implements Comparator<Hop> {
-        public int compare(Hop o1, Hop o2) {
-            return o1.getHop() - o2.getHop();
+    class HopComparator implements Comparator<NetworkNode> {
+        public int compare(NetworkNode nn1, NetworkNode nn2) {
+            return nn1.getHop() - nn2.getHop();
         }
     }
 
@@ -26,8 +27,8 @@ public class Storage {
         return new HopComparator();
     }
 
-    public synchronized SortedSet<Hop> getHops() {
-        return hops;
+    public synchronized SortedSet<NetworkNode> getNetworkNodes() {
+        return networkNodes;
     }
 
     public ExecutorService getExecutor() {

@@ -13,7 +13,9 @@ import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.ScrollView;
 import android.widget.TextView;
+import android.widget.Toast;
 
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -21,6 +23,8 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import ru.jxt.traceroutetest.callbacks.OnItemCreateContextMenuListener;
 import ru.jxt.traceroutetest.callbacks.OnReportClickListener;
+import ru.jxt.traceroutetest.callbacks.OnReportFormationWhenTraceFinishedCallback;
+import ru.jxt.traceroutetest.helpers.URLHelper;
 
 public class MainActivity extends AppCompatActivity {
 
@@ -31,8 +35,6 @@ public class MainActivity extends AppCompatActivity {
 
     private OnReportClickListener mOnReportClickListener;
     private OnItemCreateContextMenuListener mOnItemCreateContextMenuListener;
-
-    int count = 0;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -50,17 +52,14 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void layoutWidgetsSetup() {
-        OnClickToStartTrace mOnClickToStartTrace = new OnClickToStartTrace();
-
         Button mTestButton = (Button) findViewById(R.id.reportButton);
         EditText mEditText = (EditText) findViewById(R.id.editText);
-
+        OnClickToStartTrace mOnClickToStartTrace = new OnClickToStartTrace();
         mTestButton.setOnClickListener(mOnClickToStartTrace);
         mEditText.setOnEditorActionListener(mOnClickToStartTrace);
     }
 
     private class OnClickToStartTrace implements View.OnClickListener, TextView.OnEditorActionListener {
-
         @Override
         public void onClick(View v) {
             startTraceAndAddTracedItemView(v);
@@ -72,90 +71,108 @@ public class MainActivity extends AppCompatActivity {
                 startTraceAndAddTracedItemView(v);
             return false;
         }
+    }
 
-        private void startTraceAndAddTracedItemView(View v) {
-            String host = getHostAndResetSearchLine(v);
-
-            if(host != null) {
+    private void startTraceAndAddTracedItemView(View v) {
+        String strurl = getUrlAndResetSearchLine(v);
+        if(strurl != null) {
+            try {
+                Traceroute mTraceroute = startTrace(strurl);
+                //добавим соответствующий item (TracedItemView) в UI для отследивания результата
                 LinearLayout main = (LinearLayout) findViewById(R.id.mainLayout);
                 ScrollView scroll = (ScrollView) main.getParent();
+                //если список содержит много TracedItemView и мы пролиснули его
+                // то при добавлении нового TracedItemView список пролистнется наверх
                 scroll.smoothScrollTo(0, 0);
-                main.addView(createTracedItemView(host), 0);
-                startTrace(host);
+                main.addView(createTracedItemView(strurl, mTraceroute.hashCode()), 0);
             }
-        }
-
-        private String getHostAndResetSearchLine(View v) {
-            EditText mEditText = (EditText) ((View) v.getParent()).findViewById(R.id.editText);
-            String host = mEditText.getText().toString();
-            mEditText.setText("");
-            if(host.isEmpty())
-                return null;
-            return host;
-        }
-
-        private View createTracedItemView(String host) {
-            View item = ((LayoutInflater) getSystemService(LAYOUT_INFLATER_SERVICE)).inflate(R.layout.item_layout, null);
-            item.setTag(count);
-            item.setOnCreateContextMenuListener(mOnItemCreateContextMenuListener);
-
-            TextView mHostTextView = (TextView) item.findViewById(R.id.hostTextView);
-            Button mResultButton = (Button) item.findViewById(R.id.reportButton);
-            ProgressBar mProgressBar = (ProgressBar) item.findViewById(R.id.progressBar);
-            TextView mErrorTextView = (TextView) item.findViewById(R.id.errorTextView);
-
-            mHostTextView.setText(host);
-            mResultButton.setVisibility(View.GONE);
-            mProgressBar.setVisibility(View.VISIBLE);
-            mErrorTextView.setVisibility(View.GONE);
-            return item;
-        }
-
-        private void startTrace(String url) {
-            Traceroute mTraceroute = new Traceroute(getApplicationContext());
-            mTracerouteList.add(mTraceroute);
-            mTraceroute.setUrl(url);
-            mTraceroute.setHopLimit(30);
-            mTraceroute.setPingCount(1);
-            mTraceroute.setResponseTimeout(5);
-            mTraceroute.setTag(count++);
-            mTraceroute.setOnErrorCallback(mOnErrorCallback);
-            mTraceroute.setOnTraceFinishedCallback(mOnTraceFinishedCallback);
-            mTraceroute.start();
+            catch(URLHelper.UrlNotValidException e) { //покажем что есть ошибка во введенном url
+                Toast.makeText(MainActivity.this, "Url isn't valid!", Toast.LENGTH_SHORT).show();
+            }
         }
     }
 
-    Traceroute.OnTraceFinishedCallback mOnTraceFinishedCallback = new Traceroute.OnTraceFinishedCallback() {
-        @Override
-        public void onTraceFinished(Traceroute traceroute, ArrayList<String> result) {
-            boolean emptyReport = result.isEmpty();
-            if(!emptyReport) {
-                String text = "";
-                for(String t : result)
-                    text += (t + "\r\n");
+    //метод для получения url из EditText
+    private String getUrlAndResetSearchLine(View v) {
+        EditText mEditText = (EditText) ((View) v.getParent()).findViewById(R.id.editText);
+        String host = mEditText.getText().toString();
+        mEditText.setText("");
+        if(host.isEmpty())
+            return null;
+        return host;
+    }
 
-                reports.put((int) traceroute.getTag(), text);
-            }
+    //создание TracedItem для соответствующего экземпляра Traceroute, чтобы отслеживать его работу
+    private View createTracedItemView(String host, int hash) {
+        View item = ((LayoutInflater) getSystemService(LAYOUT_INFLATER_SERVICE)).inflate(R.layout.item_layout, null);
+        item.setTag(hash);
+        item.setOnCreateContextMenuListener(mOnItemCreateContextMenuListener);
+
+        TextView mHostTextView = (TextView) item.findViewById(R.id.hostTextView);
+        Button mResultButton = (Button) item.findViewById(R.id.reportButton);
+        ProgressBar mProgressBar = (ProgressBar) item.findViewById(R.id.progressBar);
+        TextView mErrorTextView = (TextView) item.findViewById(R.id.errorTextView);
+
+        mHostTextView.setText(host);
+        mResultButton.setVisibility(View.GONE);
+        mProgressBar.setVisibility(View.VISIBLE);
+        mErrorTextView.setVisibility(View.GONE);
+        return item;
+    }
+
+    private Traceroute startTrace(String strurl) throws URLHelper.UrlNotValidException {
+        //получаем валидный объект URL из пришедшей строки, иначе кинем исключение
+        URL url = URLHelper.getValidURLFromString(strurl);
+
+        Traceroute mTraceroute = new Traceroute(getApplicationContext());
+        //добавляем в список, чтобы можно было заершить все запущенные Traceroute при выходе из приложения
+        mTracerouteList.add(mTraceroute);
+        //объекту отдаем host, тк из командной строки работает именно с хостом
+        mTraceroute.setHost(url.getHost());
+        //устанавливаем за максимум сколько hop'ов должен быть достигнуть нужный host
+        //по умолчанию в windows это значение 30
+        mTraceroute.setHopLimit(30);
+        //тк traceroute сделан из команды ping, то устанавливаем сколько раз будет пинговаться каждый узел
+        //traceroute в Android без root-прав не доступен
+        mTraceroute.setPingCount(1);
+        //устанавливаем за сколькосекунд узел должен дать ответ, о том что он доступен
+        mTraceroute.setResponseTimeout(5);
+        //устанавливаем колбэк, чтобы вывести юзеру сообщение об ошибке
+        mTraceroute.setOnErrorCallback(mOnErrorCallback);
+        //устанавливаем колбэк, чтобы обновить UI и "вывести кнопку с результатом"
+        mTraceroute.setOnTraceFinishedCallback(mOnTraceFinishedCallback);
+        mTraceroute.start();
+        return mTraceroute;
+    }
+
+    OnReportFormationWhenTraceFinishedCallback mOnTraceFinishedCallback = new OnReportFormationWhenTraceFinishedCallback() {
+        @Override
+        public void onTraceFinished(Traceroute traceroute, ArrayList<String> report) {
+            super.onTraceFinished(traceroute, report); //сформировали и добавили отчет
+            //убираем Traceroute из списка, тк он уже отработал
             mTracerouteList.remove(traceroute);
-            tracedItemChangeState(traceroute, emptyReport, false, null);
+            //обновляем состяние соответствующего TracedItemView в UI
+            tracedItemChangeState(traceroute.hashCode(), report.isEmpty(), false, null);
         }
     };
 
     Traceroute.OnErrorCallback mOnErrorCallback = new Traceroute.OnErrorCallback() {
         @Override
         public void onError(Traceroute traceroute, String error) {
-            traceroute.cancelAll();
+            //убираем Traceroute из списка, тк он уже отработал
             mTracerouteList.remove(traceroute);
-            tracedItemChangeState(traceroute, true, true, error);
+            //обновляем состяние соответствующего TracedItemView в UI, в котором отобразим текст ошибки
+            tracedItemChangeState(traceroute.hashCode(), true, true, error);
         }
     };
 
-    private void tracedItemChangeState(Traceroute traceroute, final boolean emptyReport, final boolean error, final String errorText) {
-        View item = getViewByTag(traceroute.getTag());
+    private void tracedItemChangeState(Object tag, final boolean emptyReport, final boolean error, final String errorText) {
+        View item = getViewByTag(tag);
         final Button mReportButton = (Button) item.findViewById(R.id.reportButton);
         final ProgressBar mProgressBar = (ProgressBar) item.findViewById(R.id.progressBar);
         final TextView mErrorView = (TextView) item.findViewById(R.id.errorTextView);
 
+        //обновим видимости элементов TracedItemView
         runOnUiThread(new Runnable() {
             @Override
             public void run() {
@@ -187,9 +204,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         if (mTracerouteList != null) {
-            for(Traceroute c : mTracerouteList)
-                if(c != null)
-                    c.cancelAll();
+            //завершим все traceroute, если вышли из приложения
+            for(Traceroute traceroute : mTracerouteList)
+                traceroute.cancel();
         }
         super.onDestroy();
     }

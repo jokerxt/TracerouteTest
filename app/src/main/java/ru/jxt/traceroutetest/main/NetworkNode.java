@@ -1,59 +1,43 @@
 package ru.jxt.traceroutetest.main;
 
 import java.net.InetAddress;
-import java.net.UnknownHostException;
 import java.util.ArrayList;
 
-public class Hop {
-    public static final double MAX_TIME = 200000.0d;
-    public static InetAddress NULL_ADDRESS;
-    private static final byte[] bytes;
-    private ArrayList<Double> times;
+public class NetworkNode {
     private int hop;
+    private ArrayList<Double> times; //list, в который записываются времена прохождения пинга
     private ICMP_RESPONSE icmpResponse;
     private InetAddress inetAddress;
     private boolean isTarget;
 
-
+    //Internet Control Message Protocol (ICMP) — протокол межсетевых управляющих сообщений
+    //типы ICMP ответов от пингуемых узлов
     public enum ICMP_RESPONSE {
-        HIT,
-        TTL_EXCEEDED,
-        NO_ANSWER,
-        DEST_UNREACHABLE,
-        FILTERED,
-        OTHER
+        HIT,              //ответ удовлетворяет
+        TTL_EXCEEDED,     //time to live (ttl) время жизни превышено
+        NO_ANSWER,        //нет ответа
+        DEST_UNREACHABLE, //цель(хост) не достигнута
+        FILTERED,         //пинг был отфильтрован и не пропущен дальше
+        OTHER             //иное
     }
 
-    static {
-        NULL_ADDRESS = null;
-        bytes = new byte[4];
-    }
-
-    public Hop() {
+    public NetworkNode() {
         this.times = new ArrayList<>();
-
-        if (NULL_ADDRESS == null) {
-            try {
-                NULL_ADDRESS = InetAddress.getByAddress(bytes);
-            } catch (UnknownHostException e) {
-                e.printStackTrace();
-            }
-        }
     }
 
-    public Hop(int hopNumber) {
+    public NetworkNode(int hopNumber) {
         this();
         this.hop = hopNumber;
         this.isTarget = false;
     }
 
-    public Hop(int hopNumber, InetAddress address) {
+    public NetworkNode(int hopNumber, InetAddress address) {
         this(hopNumber);
         this.inetAddress = address;
         this.icmpResponse = ICMP_RESPONSE.TTL_EXCEEDED;
     }
 
-    public Hop(int hopNumber, InetAddress address, ICMP_RESPONSE icmpErr) {
+    public NetworkNode(int hopNumber, InetAddress address, ICMP_RESPONSE icmpErr) {
         this(hopNumber, address);
         this.icmpResponse = icmpErr;
     }
@@ -100,7 +84,7 @@ public class Hop {
         if (getClass() != obj.getClass()) {
             return false;
         }
-        Hop other = (Hop) obj;
+        NetworkNode other = (NetworkNode) obj;
         if (this.inetAddress == null) {
             if (other.inetAddress != null) {
                 return false;

@@ -2,22 +2,23 @@ package ru.jxt.traceroutetest.main;
 
 import android.util.Log;
 import java.net.InetAddress;
+import java.net.NetworkInterface;
+import java.net.SocketException;
+import java.util.Enumeration;
 import java.util.SortedMap;
 import java.util.SortedSet;
 import java.util.TreeMap;
 import java.util.concurrent.Future;
 
 import ru.jxt.traceroutetest.MainActivity;
+import ru.jxt.traceroutetest.main.tasks.TracerTask;
 
-public class Tracer {
-    public static final int DEFAULT_HOPS = 15;
-    public static final int DEFAULT_PACKET_SIZE = 56;
+public class Tracer extends PingerRoot {
+    public static final int DEFAULT_HOPS = 30;
     private static final int FIRST_HOP = 1;
 
-    private String error;
-    private SortedMap<Hop, Future<TracerTask>> futures;
-    private int hoplimit;
-    private SortedSet<Hop> hops;
+    private SortedMap<NetworkNode, Future<TracerTask>> futures;
+    private SortedSet<NetworkNode> networkNodes;
     private int maxHops;
     private InetAddress localAddress;
     private int pingcount;
@@ -31,164 +32,169 @@ public class Tracer {
         }
     }
 
-    public Tracer(Storage storage, InetAddress host, InetAddress localAddress, int pingcount, int timeout, int hoplimit) {
+    public Tracer(Storage storage, InetAddress host, int pingcount, int timeout, int hoplimit) {
         this.mStorage = storage;
-        this.hops = storage.getHops();
-        this.error = null;
+        this.networkNodes = storage.getNetworkNodes();
         this.targetHost = host;
         this.pingcount = pingcount;
         this.timeout = timeout;
-        this.hoplimit = hoplimit;
-        this.localAddress = localAddress;
+        this.localAddress = getLocalIpAddress();
         this.maxHops = hoplimit;
         this.futures = new TreeMap<>(storage.getHopComparator());
     }
 
-    public class TracerTask extends PingTask {
-        public void run() {
-            super.run();
-        }
-
-        public TracerTask(Hop hop) {
-            super(hop, localAddress, pingcount, hop.getHop(), timeout, DEFAULT_PACKET_SIZE);
-        }
-
-        protected void postRun(Hop hop) {
-            if (responseIp == null) {
-                hop.setInetAddress(Hop.NULL_ADDRESS);
-                hop.setIcmpResponse(Hop.ICMP_RESPONSE.NO_ANSWER);
+    //получение локального ip устройства
+    public InetAddress getLocalIpAddress() {
+        try {
+            Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces();
+            while (en.hasMoreElements()) {
+                Enumeration<InetAddress> enumIpAddr = en.nextElement().getInetAddresses();
+                while (enumIpAddr.hasMoreElements()) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress())
+                        return inetAddress;
+                }
             }
-            try {
-                setTraceElement(hop);
-            } catch (TraceException e) {
-                e.printStackTrace();
-                setError(e.getMessage());
-            }
-        }
-    }
-
-    public void setError(String err) {
-        error = err;
-    }
-
-    public String getError() {
-        return error;
-    }
-
-    public void trace() {
-        traceHops(FIRST_HOP, maxHops);
+        } catch (SocketException ignored) { }
+        return null;
     }
 
     public synchronized boolean isFinished() {
-        if (futures.isEmpty()) {
-            log("TRACE FINISHED hops number - " + hops.size());
+        if (futures.isEmpty()) { //когда futures пустой, значит "трассировка" закончена
+            boolean networkNodesIsEmpty = networkNodes.isEmpty();
+            boolean lastIsTargetHost = networkNodes.last().getInetAddress().equals(targetHost);
 
-            if (!hops.isEmpty() && !hops.last().getInetAddress().equals(targetHost)) {
-                Hop lastHop = new Hop(hops.size() + 1, targetHost, Hop.ICMP_RESPONSE.NO_ANSWER);
-                if (hops.add(lastHop)) {
-                    log("ADD LAST HOP SUCCEDED " + lastHop.toString());
-                    lastHop.setTarget(true);
+            if (!networkNodesIsEmpty && !lastIsTargetHost) {
+                //если у нас превышен лимит хопов (по умолчанию 30)
+                //то в конец добавляем хост, которому выполнили traceroute
+                //и выставляем ему NO_ANSWER
+                NetworkNode lastNetworkNode = new NetworkNode(networkNodes.size() + 1, targetHost, NetworkNode.ICMP_RESPONSE.NO_ANSWER);
+                if (networkNodes.add(lastNetworkNode)) {
+                    lastNetworkNode.setTarget(true);
                 } else {
-                    log("ADD LAST HOP FAILED");
+                    log("Add last NetworkNode failed!");
                 }
-            } else if (hops.isEmpty()) {
-                log("HOPS IS EMPTY");
+            } else if (networkNodesIsEmpty) {
+                //если за трассировку не нашлось узлов, значит маршрут не построен
                 setError("No route to host");
-            } else if (hops.last().getInetAddress().equals(targetHost)) {
-                log("LAST IS TARGET!");
-                hops.last().setTarget(true);
+            } else {
+                //если последний добавленный ip networkNodes совпадает с targetHost - значит это и есть наш хост
+                networkNodes.last().setTarget(true);
             }
             return true;
         }
         return false;
     }
 
+    public void trace() {
+        traceHops(FIRST_HOP, maxHops);
+    }
+
     private synchronized void traceHops(int from, int to) {
+        //по хопам начиная от from до to (хоп(hop) - это расстояние до узла, количественно идентичен времени жизни пакета - ttl)
+        //первый узел - это узел, до которого расстояние 1 хоп (например через wi-fi - первый узел - это роутер 192.168.0.1)
+        //тут сформируется лист всех нужных networkNodе для дальнейшего пинга каждого узла по отдельности
         for (int i = from; i <= to; i ++) {
-            Hop hop = new Hop(i, targetHost);
-            TracerTask task = new TracerTask(hop);
-            try {
-                if (futures.put(hop, mStorage.getExecutor().submit(task, task)) != null)
-                    log("Failed to insert future for hop " + hop);
+            NetworkNode networkNode = new NetworkNode(i, targetHost);
+            //получаем ip адреса узлов в TracerTask
+            TracerTask task = new TracerTask(networkNode, localAddress, pingcount, timeout) {
+                @Override
+                protected void postRun(NetworkNode networkNode) {
+                    super.postRun(networkNode);
+                    try {
+                        //по завершению трассировки определенного хопа обработаем полученный networkNode
+                        setTraceElement(networkNode);
+                    } catch (TraceException e) {
+                        setError(e.getMessage());
+                    }
+                }
+            };
+            try { //запускаем задачу и кладем future в мап для отслеживания в isFinished
+                if (futures.put(networkNode, mStorage.getExecutor().submit(task, task)) != null)
+                    log("Failed to insert future for networkNode " + networkNode);
             } catch (Exception e) {
                 e.printStackTrace();
             }
         }
     }
 
-	private synchronized void setTraceElement(Hop hop) throws TraceException {
-		if(hop.getInetAddress().equals(localAddress)) {
-			if(hop.getIcmpResponse().equals(Hop.ICMP_RESPONSE.DEST_UNREACHABLE) ||
-				hop.getIcmpResponse().equals(Hop.ICMP_RESPONSE.NO_ANSWER)) {
+	private synchronized void setTraceElement(NetworkNode networkNode) throws TraceException {
+		if(networkNode.getInetAddress().equals(localAddress)) {
+            //если вдруг мы пингуем локальный адрес
+			if(networkNode.getIcmpResponse().equals(NetworkNode.ICMP_RESPONSE.DEST_UNREACHABLE) ||
+				networkNode.getIcmpResponse().equals(NetworkNode.ICMP_RESPONSE.NO_ANSWER)) {
+                //и по каким-то причинам нет ответа или хост недостижим
 				
 				if(futures.isEmpty())
 					return;
-				
+
+                //очищаем futures, потому что цель недостижима и бросаем исключение
 				futures.clear();
 				throw new TraceException("Target is not reachable");
 			}
 		}
 		
-		Hop lastHop = null;
+		NetworkNode lastNetworkNode = null;
 		
-		if(!hops.isEmpty())
-			lastHop = hops.last();
+		if(!networkNodes.isEmpty())
+			lastNetworkNode = networkNodes.last();
 		
 		boolean doNotAdd = false;
-		Future thisTask = (Future) futures.get(hop);
+		Future thisTask = (Future) futures.get(networkNode);
         if(thisTask != null)
-            futures.remove(hop);
-		
-		switch(hop.getIcmpResponse()) {
+            futures.remove(networkNode); //тк пинг выполнен, удаляем future из мап
+
+        //проверяем что нам принесло выполнение ping команды
+		switch(networkNode.getIcmpResponse()) {
 		case HIT:
-			if(lastHop != null) {
-				if(lastHop.equals(hop)) { //узел с адресом уже есть
-                    //log
-					if(lastHop.getHop() > hop.getHop()) { //если hop меньше последнего
-						//передобавляем с меньшим hop
-						hops.remove(lastHop);
-						hops.add(hop);
+			if(lastNetworkNode != null) {
+				if(lastNetworkNode.equals(networkNode)) { //узел с адресом уже есть
+					if(lastNetworkNode.getHop() > networkNode.getHop()) { //если текущий узел имеет хоп меньше последнего
+						//передобавляем networkNode с меньшим хопом
+                        //тк получается что до текущего узла мы дошли за меньше ttl
+						networkNodes.remove(lastNetworkNode);
+						networkNodes.add(networkNode);
 					}
 					break;
 				}
 			}
 			//добавляем новый узел
-			hops.add(hop);
+			networkNodes.add(networkNode);
 			break;
 			
-		case TTL_EXCEEDED:
-			hops.add(hop);
+		case TTL_EXCEEDED: //просто добавляем
+			networkNodes.add(networkNode);
 			break;
 			
 		case NO_ANSWER:
 			doNotAdd = true;
-			if(lastHop != null) {
-				if(lastHop.getIcmpResponse() == Hop.ICMP_RESPONSE.HIT) {
-					//нет ответа от текущего узла
-					if(!lastHop.getInetAddress().equals(targetHost) | hop.getHop() < lastHop.getHop())
-					    hops.add(hop);
+			if(lastNetworkNode != null) {
+				if(lastNetworkNode.getIcmpResponse() == NetworkNode.ICMP_RESPONSE.HIT) {
+					if(!lastNetworkNode.getInetAddress().equals(targetHost) | networkNode.getHop() < lastNetworkNode.getHop())
+					    networkNodes.add(networkNode); //добавляем узел хоть до него не проходит пинг, тк хопов до него меньше
 					break;
 				}
 			}
-            log("no answer last " + hop);
 			break;
 			
 		case DEST_UNREACHABLE:
-            log("Dest unreachable " + hop);
+            log("Dest unreachable " + networkNode);
 			break;
 			
 		case FILTERED:
 		case OTHER:
-            log("Filtered or other " + hop);
+            log("Filtered or other " + networkNode);
 			doNotAdd = true;
-			hops.add(hop);
+			networkNodes.add(networkNode);
 			break;
 		}
 		
 		if(!doNotAdd) {
-			if(hop.getHop() == maxHops) {
-				if(hop.getIcmpResponse() != Hop.ICMP_RESPONSE.HIT) {
-					throw new TraceException("Hop limit reached");
+            //проверяем максимум ли хопов до текущего узела
+			if(networkNode.getHop() == maxHops) {
+                //если во время traceroute узел не был пропингован
+				if(networkNode.getIcmpResponse() != NetworkNode.ICMP_RESPONSE.HIT) {
+					throw new TraceException("NetworkNode limit reached"); //бросаем, что лимит хопов исчерпан
 				}
 			}
 		}
@@ -197,5 +203,4 @@ public class Tracer {
     private void log(String msg) {
         Log.w(MainActivity.TAG, msg);
     }
-
 }
