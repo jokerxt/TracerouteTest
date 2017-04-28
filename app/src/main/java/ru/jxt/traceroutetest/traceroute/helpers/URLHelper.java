@@ -1,10 +1,18 @@
-package ru.jxt.traceroutetest.helpers;
+package ru.jxt.traceroutetest.traceroute.helpers;
 
 import android.webkit.URLUtil;
 
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.util.regex.Pattern;
+
+/*
+* Помощник в работе с URL
+* Дает возможность получить из строки валидный URL
+* в противном случае выкидывает исключение UrlNotValidException
+* Проверка с использованием регэкспов, дает возможность
+* исключить лишние знаки, которые разрешены в URL
+*/
 
 public final class URLHelper {
 

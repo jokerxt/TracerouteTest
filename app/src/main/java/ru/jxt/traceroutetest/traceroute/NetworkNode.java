@@ -1,21 +1,27 @@
-package ru.jxt.traceroutetest.main;
+package ru.jxt.traceroutetest.traceroute;
 
 import java.net.InetAddress;
 import java.util.ArrayList;
+
+/*
+* Класс NetworkNode
+* Содержит в себе всю необходимую информацию от узле сети и его доступности
+* А так же время прохождения ping команды, расстояние в хопах и ip адрес
+*/
 
 public class NetworkNode {
     private int hop;
     private ArrayList<Double> times; //list, в который записываются времена прохождения пинга
     private ICMP_RESPONSE icmpResponse;
     private InetAddress inetAddress;
-    private boolean isTarget;
 
     //Internet Control Message Protocol (ICMP) — протокол межсетевых управляющих сообщений
     //типы ICMP ответов от пингуемых узлов
     public enum ICMP_RESPONSE {
         HIT,              //ответ удовлетворяет
         TTL_EXCEEDED,     //time to live (ttl) время жизни превышено
-        NO_ANSWER,        //нет ответа
+        NO_TRACE,        //нет ответа при трассировке
+        NO_PING,         //нет ответа при пинге
         DEST_UNREACHABLE, //цель(хост) не достигнута
         FILTERED,         //пинг был отфильтрован и не пропущен дальше
         OTHER             //иное
@@ -28,26 +34,16 @@ public class NetworkNode {
     public NetworkNode(int hopNumber) {
         this();
         this.hop = hopNumber;
-        this.isTarget = false;
     }
 
     public NetworkNode(int hopNumber, InetAddress address) {
         this(hopNumber);
         this.inetAddress = address;
-        this.icmpResponse = ICMP_RESPONSE.TTL_EXCEEDED;
-    }
-
-    public NetworkNode(int hopNumber, InetAddress address, ICMP_RESPONSE icmpErr) {
-        this(hopNumber, address);
-        this.icmpResponse = icmpErr;
+        this.icmpResponse = ICMP_RESPONSE.OTHER;
     }
 
     public int getHop() {
         return this.hop;
-    }
-
-    public void setHop(int hop) {
-        this.hop = hop;
     }
 
     public InetAddress getInetAddress() {
@@ -102,14 +98,6 @@ public class NetworkNode {
         for(Double t : times)
             mstimes += (t + " ms ");
 
-        return hop + ": " + inetAddress.getCanonicalHostName() + " (" +inetAddress.getHostAddress() + ")\n       " + mstimes.trim();
-    }
-
-    public boolean isTarget() {
-        return this.isTarget;
-    }
-
-    public void setTarget(boolean isTarget) {
-        this.isTarget = isTarget;
+        return hop + ": " + inetAddress.getCanonicalHostName() + " (" + inetAddress.getHostAddress() + ")\n       " + mstimes.trim();
     }
 }

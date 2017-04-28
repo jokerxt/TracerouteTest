@@ -1,8 +1,10 @@
-package ru.jxt.traceroutetest.helpers;
+package ru.jxt.traceroutetest.traceroute.helpers;
 
-import android.util.Log;
+import static ru.jxt.traceroutetest.ui.MainActivity.reports;
 
-import static ru.jxt.traceroutetest.MainActivity.reports;
+/*
+* Помощник в работе с отчетами
+* */
 
 public class ReportsHelper {
     public static String getReport(int key) {

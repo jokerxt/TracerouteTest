@@ -1,9 +1,10 @@
-package ru.jxt.traceroutetest.asynctasks;
+package ru.jxt.traceroutetest.traceroute.asynctasks;
 
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
 import android.os.AsyncTask;
+import android.support.annotation.NonNull;
 
 import java.net.Inet6Address;
 import java.net.InetAddress;
@@ -11,11 +12,18 @@ import java.net.UnknownHostException;
 import java.util.Arrays;
 import java.util.LinkedList;
 
-public class СheckHostAndGetIpAsyncTask extends AsyncTask<String, Void, InetAddress> {
+/*
+* Асинтаск для получения массива ip адресов хоста
+* удаления всех IPv6 адресов
+* и возврата в onPostExecute первого IPv4 адреса
+* InetAddress.getAllByName работает только в отдельном потоке
+*
+*/
+public class GetIpFromHostAsyncTask extends AsyncTask<String, Void, InetAddress> {
     private Context mContext;
     private String error;
 
-    public СheckHostAndGetIpAsyncTask(Context mContext) {
+    public GetIpFromHostAsyncTask(Context mContext) {
         this.mContext = mContext;
     }
 
@@ -28,10 +36,7 @@ public class СheckHostAndGetIpAsyncTask extends AsyncTask<String, Void, InetAdd
             try {
                 LinkedList<InetAddress> ipAddresses = new LinkedList<>(Arrays.asList(ipAddressesArray));
                 //удаляем все ipv6 адреса
-                for (InetAddress ipa : ipAddresses) {
-                    if (ipa instanceof Inet6Address)
-                        ipAddresses.remove(ipa);
-                }
+                removeIPv6Addresses(ipAddresses);
                 //если оказалось, что массив состоит только из ipv6 адресов - устанавливаем ошибку
                 if (ipAddresses.isEmpty())
                     error = "Host doesn't contain ipv4";
@@ -45,7 +50,14 @@ public class СheckHostAndGetIpAsyncTask extends AsyncTask<String, Void, InetAdd
         return null;
     }
 
-    private InetAddress[] getAllIpAddresses(String hostname) {
+    private void removeIPv6Addresses(LinkedList<InetAddress> ipAddresses) {
+        for (InetAddress ipa : ipAddresses) {
+            if (ipa instanceof Inet6Address)
+                ipAddresses.remove(ipa);
+        }
+    }
+
+    private InetAddress[] getAllIpAddresses(@NonNull String hostname) {
         try { //получаем все ip-адреса хоста, getAllByName не работает в UI-потоке
             return InetAddress.getAllByName(hostname);
         } catch (UnknownHostException e) {

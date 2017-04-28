@@ -1,4 +1,4 @@
-package ru.jxt.traceroutetest;
+package ru.jxt.traceroutetest.traceroute;
 
 import android.content.Context;
 import android.os.AsyncTask;
@@ -11,24 +11,29 @@ import java.net.IDN;
 import java.net.InetAddress;
 import java.util.ArrayList;
 
-import ru.jxt.traceroutetest.asynctasks.PingAsyncTask;
-import ru.jxt.traceroutetest.asynctasks.TraceAsyncTask;
-import ru.jxt.traceroutetest.asynctasks.СheckHostAndGetIpAsyncTask;
-import ru.jxt.traceroutetest.main.Storage;
-import ru.jxt.traceroutetest.main.Tracer;
+import ru.jxt.traceroutetest.traceroute.asynctasks.GetIpFromHostAsyncTask;
+import ru.jxt.traceroutetest.traceroute.asynctasks.TracerAsyncTask;
+
+
+/* Класс Traceroute
+* Выполннеие трассировки с параметрами заданного url
+* По окончанию трасировки вызывается колбэк OnTraceFinishedCallback
+* в метод onTraceFinished которого возвращается отчет сформированный в ReportFormatter
+* При возникновении ошибки вызывается колбэк OnErrorCallback
+* в метод onError которого возвращается текст ошибки
+* */
 
 public class Traceroute {
 
+    private static final int DEFAULT_HOPS = 15;
+
     private String mHost;
     private Context mContext;
-    private Storage mStorage;
+    private TracerAsyncTask tracerAsyncTask;
 
     private int pingCount;
     private int responseTimeout;
     private int hopLimit;
-
-    private TraceAsyncTask tracerTask;
-    private PingAsyncTask pingerTask;
 
     private OnTraceFinishedCallback mOnTraceFinishedCallback;
     private OnErrorCallback mOnErrorCallback;
@@ -43,23 +48,14 @@ public class Traceroute {
 
     public Traceroute(Context context) {
         mContext = context;
-        mStorage = new Storage();
         //заданим дефолтные настройки
-        pingCount = 1;
+        pingCount = 3;
         responseTimeout = 5;
         hopLimit = 30;
     }
 
     public void cancel() {
-        if (tracerTask != null)
-            tracerTask.cancel(true);
-
-        if (pingerTask != null)
-            pingerTask.cancel(true);
-
-        mStorage.getNetworkNodes().clear();
-        tracerTask = null;
-        pingerTask = null;
+        tracerAsyncTask.cancel(true);
     }
 
     public void start() {
@@ -70,7 +66,7 @@ public class Traceroute {
     }
 
     private void checkHostAndStart(@NonNull String hostname) {
-        new СheckHostAndGetIpAsyncTask(mContext) {
+        new GetIpFromHostAsyncTask(mContext) {
             @Override
             protected void onPostExecute(InetAddress ipAddress) {
                 //если получили ip адрес, то запускаем trace иначе выводим ошибку
@@ -83,31 +79,13 @@ public class Traceroute {
     }
 
     private void startTrace(@NonNull InetAddress ipAddress) {
-        if (tracerTask == null) {
-            tracerTask = new TraceAsyncTask(mStorage, pingCount, responseTimeout, hopLimit) {
-                @Override
-                protected void onPostExecute(Void aVoid) {
-                    //проверим если у нас узлы в списке
-                    if(!mStorage.getNetworkNodes().isEmpty())
-                        startPing(); //проверяем ping до каждого найденного узла
-                    else //если узлов нет, то что-то было не так, покажем что (какая была ошибка)
-                        callErrorCallback(getError());
-                }
-            };
-            tracerTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR, ipAddress);
-        }
-    }
-
-    private void startPing() {
-        if (pingerTask == null) {
-            pingerTask = new PingAsyncTask(mStorage, responseTimeout) {
-                @Override
-                protected void onPostExecute(ArrayList<String> report) {
-                    callFinishCallback(report);
-                }
-            };
-            pingerTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
-        }
+        tracerAsyncTask = new TracerAsyncTask(ipAddress, hopLimit, pingCount, responseTimeout) {
+            @Override
+            protected void onPostExecute(@NonNull ArrayList<String> report) {
+                callFinishCallback(report);
+            }
+        };
+        tracerAsyncTask.executeOnExecutor(AsyncTask.THREAD_POOL_EXECUTOR);
     }
 
     //метод проверки доступности команды ping
@@ -136,7 +114,7 @@ public class Traceroute {
             mOnErrorCallback.onError(this, msg);
     }
 
-    private void callFinishCallback(ArrayList<String> report) {
+    private void callFinishCallback(@NonNull ArrayList<String> report) {
         //колбэк для возврата отчета
         if(mOnTraceFinishedCallback != null)
             mOnTraceFinishedCallback.onTraceFinished(this, report);
@@ -156,7 +134,7 @@ public class Traceroute {
 
     public void setHopLimit(int hop) {
         if(hop < 1 || 255 < hop)
-            hopLimit = Tracer.DEFAULT_HOPS;
+            hopLimit = DEFAULT_HOPS;
         else
             hopLimit = hop;
     }

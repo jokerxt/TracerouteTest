@@ -1,4 +1,4 @@
-package ru.jxt.traceroutetest;
+package ru.jxt.traceroutetest.ui;
 
 import android.app.Dialog;
 import android.content.Context;
@@ -8,6 +8,13 @@ import android.view.View;
 import android.view.Window;
 import android.view.WindowManager;
 import android.widget.TextView;
+
+import ru.jxt.traceroutetest.R;
+
+/*
+* Класс ReportDialog
+* Специфический диалог для показа отчетов трассировки
+*/
 
 public class ReportDialog extends Dialog {
 
